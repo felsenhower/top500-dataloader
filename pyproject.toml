@@ -7,7 +7,11 @@ authors = [
     { name = "Ruben Felgenhauer", email = "ruben.felgenhauer@posteo.de" }
 ]
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "platformdirs>=4.5.0",
+    "polars>=1.34.0",
+    "pydantic>=2.12.0",
+]
 
 [project.scripts]
 top500 = "top500:main"
