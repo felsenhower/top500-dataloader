@@ -12,6 +12,7 @@ import re
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
+
 @dataclass
 class Top500ListInfo:
     key: str
@@ -154,7 +155,6 @@ def iter_lists_online(newest_first: bool = True) -> Iterator[Top500ListInfo]:
                 place_str.replace(f", {state}", f", {_US_STATES[state]}")
                 return f"{place_str}, USA"
         raise ValueError(f'Unrecognized place "{place_str}"')
-
 
     response = _fetch(_TOP500_OVERVIEW_URL)
     response.raise_for_status()
