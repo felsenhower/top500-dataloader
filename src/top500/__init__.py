@@ -57,6 +57,7 @@ def _fetch(url):
 _TOP500_OVERVIEW_URL = HttpUrl("https://top500.org/lists/top500/")
 _RE_LIST_NAME = re.compile(r"^(?:June)|(?:November) [0-9]{4}$")
 _RE_LIST_HREF = re.compile(r"^([0-9]{4})/([0-9]{2})$")
+_RE_LIST_KEY = re.compile(r"^([0-9]{4})-([0-9]{2})$")
 _RE_DOWNLOADED_LIST_FILE = re.compile(r"^([0-9]{4})-([0-9]{2})\.tar\.gz$")
 _RE_LIST_DESCRIPTION = re.compile(
     r"""
@@ -208,7 +209,43 @@ def iter_lists_local(newest_first: bool = True) -> Iterator[Top500ListInfo]:
             yield list_info
 
 
-def download_list(list_info: Top500ListInfo) -> None:
+def _get_key(key_or_list_info: str | Top500ListInfo) -> str:
+    if isinstance(key_or_list_info, str):
+        key = key_or_list_info
+    elif isinstance(key_or_list_info, Top500ListInfo):
+        key = key_or_list_info.key
+    assert _RE_LIST_KEY.match(key)
+    return key
+    raise ValueError(
+        f"key_or_list_info must be either str or Top500ListInfo, passed {type(identifier)}"
+    )
+
+
+def _get_list_info_from_key(key: str) -> Top500ListInfo:
+    print(
+        "Warning: When downloading multiple lists at once, it is not recommended to specify it using only its key. Pass a Top500ListInfo instead!"
+    )
+    assert _RE_LIST_KEY.match(key)
+    for list_info in iter_lists_online():
+        if list_info.key == key:
+            return list_info
+    raise RuntimeError(f'List info for key "{key}" was not found online.')
+
+
+def _get_list_info(key_or_list_info: str | Top500ListInfo) -> Top500ListInfo:
+    if isinstance(key_or_list_info, str):
+        key = key_or_list_info
+        list_info = _get_list_info_from_key(key)
+        return list_info
+    if isinstance(key_or_list_info, Top500ListInfo):
+        list_info = key_or_list_info
+        return list_info
+    raise ValueError(
+        f"key_or_list_info must be either str or Top500ListInfo, passed {type(identifier)}"
+    )
+
+
+def download_list(key_or_list_info: str | Top500ListInfo) -> None:
     def download_file_from_link_text(link_text: str, anchors, tar):
         download_anchor = next(filter(lambda a: a.text == link_text, anchors), None)
         assert download_anchor is not None, ("No download link found", link_text)
@@ -253,9 +290,13 @@ def download_list(list_info: Top500ListInfo) -> None:
         tarinfo.size = len(json_bytes)
         tar.addfile(tarinfo, bio)
 
-    target_path = get_download_dir() / f"{list_info.key}.tar.gz"
+    key = _get_key(key_or_list_info)
+
+    target_path = get_download_dir() / f"{key}.tar.gz"
     if target_path.exists():
         return
+
+    list_info = _get_list_info(key_or_list_info)
 
     with tempfile.NamedTemporaryFile(delete_on_close=True) as tmp:
         with tarfile.open(name=tmp.name, mode="w:gz") as tar:
@@ -284,8 +325,32 @@ def download_all_lists() -> None:
         download_list(info)
 
 
-def read_list(identifier: str | Top500ListInfo) -> pl.DataFrame:
-    raise NotImplementedError()
+def read_list(
+    key_or_list_info: str | Top500ListInfo, allow_download: bool = True
+) -> pl.DataFrame:
+    # TODO: Add argument normalized: bool = True
+    # normalized == True ==> the columns of the dataframe and their dtype will always be the same
+    # normalized == False ==> read raw
+    # Current behaviour is normalized == False
+
+    key = _get_key(key_or_list_info)
+    assert _RE_LIST_KEY.match(key)
+    filename = get_download_dir() / f"{key}.tar.gz"
+    if not filename.exists():
+        if not allow_download:
+            raise RuntimeError(
+                f'List "{key}" was not found locally and allow_download == False.'
+            )
+        download_list(key_or_list_info)
+    assert filename.exists()
+    with tarfile.open(filename, "r:gz") as tar:
+        tsv_members = [
+            member for member in tar.getmembers() if Path(member.name).suffix == ".tsv"
+        ]
+        assert len(tsv_members) == 1
+        tsv_fp = tar.extractfile(tsv_members[0])
+        df = pl.read_csv(tsv_fp, separator="\t")
+        return df
 
 
 def main() -> None:
