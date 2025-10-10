@@ -23,11 +23,12 @@ import requests
 from bs4 import BeautifulSoup
 from bs4.element import Tag as HtmlTag
 from pydantic import HttpUrl, TypeAdapter
-from pydantic.dataclasses import dataclass
+import pydantic
 from ratelimit import limits, sleep_and_retry
+import dataclasses
 
 
-@dataclass
+@pydantic.dataclasses.dataclass
 class Top500ListInfo:
     """
     Represents the metadata of a single TOP500 list issue.
@@ -157,6 +158,67 @@ _US_STATES = {
         ("WY", "Wyoming"),
     )
 }
+
+
+@dataclasses.dataclass
+class NormalizedColumnMapping:
+    friendly_name: str
+    key: str
+    dtype: pl.datatypes.DataType
+    data_source: str
+    names_in_source: tuple[str, ...]
+
+
+# fmt: off
+_NORMALIZED_COLUMN_MAPPINGS = (
+    NormalizedColumnMapping("Rank", "rank", pl.Int64, "xml", ("rank",)),
+    NormalizedColumnMapping("Previous Rank", "previous-rank", pl.Int64, "excel", ("Previous Rank",)),
+    NormalizedColumnMapping("First Appearance", "first-appearance", pl.Int64, "excel", ("First Appearance",)),
+    NormalizedColumnMapping("First Rank", "first-rank", pl.Int64, "excel", ("First Rank",)),
+    NormalizedColumnMapping("System Name", "name", pl.String, "xml", ("system-name",)),
+    NormalizedColumnMapping("System ID", "system-id", pl.Int64, "xml", ("system-id",)),
+    NormalizedColumnMapping("System Address", "system-address", pl.String, "xml", ("system-address",)),
+    NormalizedColumnMapping("System Model", "system-model", pl.String, "excel", ("System Model",)),
+    NormalizedColumnMapping("System Family", "system-family", pl.String, "excel", ("System Family",)),
+    NormalizedColumnMapping("Computer", "computer", pl.String, "xml", ("computer",)),
+    NormalizedColumnMapping("Manufacturer", "manufacturer", pl.String, "xml", ("manufacturer",)),
+    NormalizedColumnMapping("Architecture", "architecture", pl.String, "excel", ("architecture",)),
+    NormalizedColumnMapping("Processor", "processor", pl.String, "excel", ("processor",)),
+    NormalizedColumnMapping("Processor Family", "processor-family", pl.String, "excel", ("Processor Family",)),
+    NormalizedColumnMapping("Processor Technology", "processor-technology", pl.String, "excel", ("Processor Technology",)),
+    NormalizedColumnMapping("Processor Generation", "processor-generation", pl.String, "excel", ("Processor Generation",)),
+    NormalizedColumnMapping("Processor Speed [Mhz]", "processor-speed-mhz", pl.Int64, "excel", ("Processor Speed (MHz)", "Proc. Frequency",)),
+    NormalizedColumnMapping("Accelerator/Co-Processor", "accelerator", pl.String, "excel", ("Accelerator/Co-Processor", "Accelerator",)),
+    NormalizedColumnMapping("Operating System", "operating-system", pl.String, "excel", ("Operating System",)),
+    NormalizedColumnMapping("OS Family", "os-family", pl.String, "excel", ("OS Family",)),
+    NormalizedColumnMapping("Total Cores", "total-cores", pl.Int64, "xml", ("number-of-processors",)),
+    NormalizedColumnMapping("Cores Per Socket", "cores-per-socket", pl.Int64, "excel", ("Cores per Socket",)),
+    NormalizedColumnMapping("Accelerator/Co-Processor Cores", "accelerator-cores", pl.Int64, "excel", ("Accelerator/Co-Processor Cores", "Accelerator Cores",)),
+    NormalizedColumnMapping("Memory", "memory", pl.Int64, "excel", ("Memory",)),
+    NormalizedColumnMapping("Rmax [GFlop/s]", "r-max-gflops", pl.Float64, "xml", ("r-max",)),
+    NormalizedColumnMapping("Power [kW]", "power-kw", pl.Float64, "xml", ("power",)),
+    NormalizedColumnMapping("Power Source", "power-source", pl.String, "excel", ("Power Source",)),
+    NormalizedColumnMapping("Rpeak [GFlop/s]", "rpeak-gflops", pl.Float64, "xml", ("r-peak",)),
+    NormalizedColumnMapping("Nmax", "n-max", pl.Int64, "excel", ("Nmax",)),
+    NormalizedColumnMapping("Nhalf", "n-half", pl.Int64, "excel", ("Nhalf",)),
+    NormalizedColumnMapping("HPCG [TFlop/s]", "hpcg-tflops", pl.Float64, "excel", ("HPCG [TFlop/s]",)),
+    NormalizedColumnMapping("Energy Efficiency [GFlop/W]", "energy-efficiency-gflopw", pl.Float64, "excel", ("Energy Efficiency [GFlops/Watts]", "Power Efficiency [GFlops/Watts]", "Power Effeciency [GFlops/Watts]",)),
+    NormalizedColumnMapping("Efficiency [%]", "efficiency-percent", pl.Float64, "excel", ("Efficiency (%)", "Effeciency (%)",)),
+    NormalizedColumnMapping("Measured Size", "measured-size", pl.Int64, "excel", ("Measured Size",)),
+    NormalizedColumnMapping("Interconnect Family", "interconnect-family", pl.String, "excel",("Interconnect Family",)),
+    NormalizedColumnMapping("Interconnect", "interconnect", pl.String, "excel", ("Interconnect",)),
+    NormalizedColumnMapping("Site Name", "site", pl.String, "xml", ("installation-site-name",)),
+    NormalizedColumnMapping("Site Address", "site-address", pl.String, "xml", ("installation-site-address",)),
+    NormalizedColumnMapping("Site ID", "site-id", pl.Int64, "xml", ("site-id",)),
+    NormalizedColumnMapping("Segment", "segment", pl.String, "xml", ("area-of-installation",)),
+    NormalizedColumnMapping("Town", "town", pl.String, "xml", ("town",)),
+    NormalizedColumnMapping("State", "state", pl.String, "xml", ("state",)),
+    NormalizedColumnMapping("Country", "country", pl.String, "xml", ("country",)),
+    NormalizedColumnMapping("Region", "region", pl.String, "excel", ("Region",)),
+    NormalizedColumnMapping("Continent", "continent", pl.String, "excel", ("Continent",)),
+    NormalizedColumnMapping("Year", "year", pl.Int64, "xml", ("year",)),
+)
+# fmt: on
 
 
 def iter_lists_online(newest_first: bool = True) -> Iterator[Top500ListInfo]:
@@ -456,7 +518,8 @@ def read_list(
             the list info objects.
         allow_download (bool, optional): Wether downloading the list is allowed when it is not stored locally. If False,
             a RuntimeError will be raised when the list is not downloaded. Defaults to True.
-        source (str, optional): The data source to read from. Can be one of {excel, xml}.
+        source (str, optional): The data source to read from. Can be one of {"excel", "xml", "normalized",
+            "normalized-pretty"}.
 
     Raises:
         RuntimeError: When `allow_download` is set to `False` and the file is not available locally.
@@ -464,11 +527,76 @@ def read_list(
     Returns:
         pl.DataFrame: A polars DataFrame containing the TOP500 list issue data.
     """
-    # TODO: Add argument normalized: bool = True
-    # normalized == True ==> the columns of the dataframe and their dtype will always be the same
-    # normalized == False ==> read raw
-    # Current behaviour is normalized == False
-    allowed_source = {"excel", "xml"}
+
+    def read_tsv(name: str, tar: TarFile) -> pl.DataFrame:
+        tsv_member = tar.getmember(name)
+        tsv_fp = tar.extractfile(tsv_member)
+        df = pl.read_csv(
+            tsv_fp, separator="\t", infer_schema_length=10000, quote_char=None
+        )
+        return df
+
+    def read_tsv_excel(tar: TarFile) -> pl.DataFrame:
+        return read_tsv("from_excel.tsv", tar)
+
+    def read_tsv_xml(tar: TarFile) -> pl.DataFrame:
+        return read_tsv("from_xml.tsv", tar)
+
+    def read_tsv_normalized(tar: TarFile) -> pl.DataFrame:
+        def set_col_name(
+            mapping: NormalizedColumnMapping, df: pl.DataFrame
+        ) -> pl.DataFrame:
+            for col_name in mapping.names_in_source:
+                if col_name in df.columns:
+                    df = df.rename({col_name: mapping.key})
+                    return df
+            df = df.with_columns(
+                pl.lit(None, dtype=mapping.dtype).alias(mapping.key),
+            )
+            return df
+
+        mappings = _NORMALIZED_COLUMN_MAPPINGS
+
+        def get_filtered_df(
+            df: pl.DataFrame, data_source: str, extra_columns: list[str] | None = None
+        ) -> pl.DataFrame:
+            my_mappings = [m for m in mappings if m.data_source == data_source]
+            for m in my_mappings:
+                df = set_col_name(m, df)
+            result_column_names = [m.key for m in my_mappings]
+            if extra_columns is not None:
+                result_column_names += extra_columns
+            df = df.select(result_column_names)
+            return df
+
+        df_excel = read_tsv_excel(tar)
+        if "Mflops/Watt" in df_excel.columns:
+            df_excel = df_excel.with_columns(
+                (pl.col("Mflops/Watt") / 1000).alias("Energy Efficiency [GFlops/Watts]")
+            )
+        df_excel = get_filtered_df(df_excel, "excel", extra_columns=["Rank"])
+        df_excel = df_excel.rename({"Rank": "rank"})
+        df_xml = read_tsv_xml(tar)
+        df_xml = get_filtered_df(df_xml, "xml")
+        df_joined = df_xml.join(df_excel, on="rank", how="inner", validate="1:1")
+        df_joined = df_joined.select(m.key for m in mappings)
+        assert df_joined.shape == (500, len(mappings))
+        return df_joined
+
+    def read_tsv_normalized_pretty(tar: TarFile) -> pl.DataFrame:
+        mappings = _NORMALIZED_COLUMN_MAPPINGS
+        df = read_tsv_normalized(tar)
+        df.columns = [m.friendly_name for m in mappings]
+        assert df.shape == (500, len(mappings))
+        return df
+
+    readers = {
+        "excel": read_tsv_excel,
+        "xml": read_tsv_xml,
+        "normalized": read_tsv_normalized,
+        "normalized-pretty": read_tsv_normalized_pretty,
+    }
+    allowed_source = set(readers.keys())
     if source not in allowed_source:
         raise ValueError(f'source "{source}" not allowed. Must be in {allowed_source}.')
     key = _get_key(list_info_or_key)
@@ -482,10 +610,4 @@ def read_list(
         download_list(list_info_or_key)
     assert filename.exists()
     with tarfile.open(filename, "r:gz") as tar:
-        tsv_name = "from_excel.tsv" if source == "excel" else "from_xml.tsv"
-        tsv_member = tar.getmember(tsv_name)
-        tsv_fp = tar.extractfile(tsv_member)
-        df = pl.read_csv(
-            tsv_fp, separator="\t", infer_schema_length=10000, quote_char=None
-        )
-        return df
+        return readers[source](tar)
