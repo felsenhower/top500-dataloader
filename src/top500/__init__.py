@@ -1,3 +1,7 @@
+"""
+top500. A TOP500 list downloader and dataloader for polars.
+"""
+
 import csv
 import os
 import re
@@ -23,12 +27,19 @@ from ratelimit import limits, sleep_and_retry
 
 @dataclass
 class Top500ListInfo:
-    key: str
-    title: str
-    number: int
-    published_on: date
-    published_at: str
-    url: HttpUrl
+    """
+    Represents the metadata of a single TOP500 list issue.
+
+    Note: In the example below, it *seems* like we can derive the list key and title from the publication date.
+          The "November 1995" issue is an outlier with the key "1995-12" and publication date "1995-12-04".
+    """
+
+    key: str  # Machine readable issue key, e.g. "2025-06"
+    title: str  # Human readable issue title, e.g. "June 2025"
+    number: int  # Running number, e.g. 65
+    published_on: date  # Publication date, e.g. 2025-06-14
+    published_at: str  # Publication place, e.g. "Hamburg, Germany"
+    url: HttpUrl  # url of the list overview, e.g. "https://top500.org/lists/top500/2025/06"
 
 
 _DEFAULT_DOWNLOAD_DIR: Path = Path(platformdirs.user_data_dir("top500", "felsenhower"))
@@ -36,6 +47,15 @@ _download_dir: Path | None = None
 
 
 def set_download_dir(download_dir: str | os.PathLike) -> None:
+    """Set the directory where lists are downloaded to.
+
+    Args:
+        download_dir (str | os.PathLike): The target directory. Must exist, be a
+            directory, and be writable.
+
+    Raises:
+        ValueError: When the given download directory is invalid.
+    """
     download_dir = Path(download_dir)
     if not download_dir.is_dir():
         raise ValueError("Given download_dir is not a directory or does not exist.")
@@ -44,6 +64,14 @@ def set_download_dir(download_dir: str | os.PathLike) -> None:
 
 
 def get_download_dir() -> Path:
+    """Get the download directory.
+
+    Note: When the download directory has not been set explicitly via `set_download_dir()`, it might not exist if no
+    list has been downloaded yet. It will be created when the first list is downloaded.
+
+    Returns:
+        Path: The download directory.
+    """
     return _download_dir or _DEFAULT_DOWNLOAD_DIR
 
 
@@ -130,6 +158,15 @@ _US_STATES = {
 
 
 def iter_lists_online(newest_first: bool = True) -> Iterator[Top500ListInfo]:
+    """Iterate over the TOP500 list issues that are available online.
+
+    Args:
+        newest_first (bool, optional): Wether the lists shall be sorted newest-first. Defaults to True.
+
+    Yields:
+        Iterator[Top500ListInfo]: An iterator over Top500ListInfo.
+    """
+
     def parse_date(date_str):
         for fmt in ("%B %d, %Y", "%b %d, %Y", "%b. %d, %Y"):
             try:
@@ -198,6 +235,14 @@ def iter_lists_online(newest_first: bool = True) -> Iterator[Top500ListInfo]:
 
 
 def iter_lists_local(newest_first: bool = True) -> Iterator[Top500ListInfo]:
+    """Iterate over the TOP500 list issues that are available locally in the download directory.
+
+    Args:
+        newest_first (bool, optional): Wether the lists shall be sorted newest-first. Defaults to True.
+
+    Yields:
+        Iterator[Top500ListInfo]: An iterator over Top500ListInfo.
+    """
     for path in sorted(get_download_dir().iterdir(), reverse=newest_first):
         if not _RE_DOWNLOADED_LIST_FILE.match(path.name):
             continue
@@ -209,21 +254,24 @@ def iter_lists_local(newest_first: bool = True) -> Iterator[Top500ListInfo]:
             yield list_info
 
 
-def _get_key(key_or_list_info: str | Top500ListInfo) -> str:
-    if isinstance(key_or_list_info, str):
-        key = key_or_list_info
-    elif isinstance(key_or_list_info, Top500ListInfo):
-        key = key_or_list_info.key
-    assert _RE_LIST_KEY.match(key)
-    return key
+def _get_key(list_info_or_key: str | Top500ListInfo) -> str:
+    if isinstance(list_info_or_key, str):
+        key = list_info_or_key
+        assert _RE_LIST_KEY.match(key)
+        return key
+    if isinstance(list_info_or_key, Top500ListInfo):
+        key = list_info_or_key.key
+        assert _RE_LIST_KEY.match(key)
+        return key
     raise ValueError(
-        f"key_or_list_info must be either str or Top500ListInfo, passed {type(identifier)}"
+        f"list_info_or_key must be either str or Top500ListInfo, passed {type(list_info_or_key)}"
     )
 
 
 def _get_list_info_from_key(key: str) -> Top500ListInfo:
     print(
-        "Warning: When downloading multiple lists at once, it is not recommended to specify it using only its key. Pass a Top500ListInfo instead!"
+        "Warning: When downloading multiple lists at once, it is not recommended to specify it using only its key."
+        + "Pass a Top500ListInfo instead!"
     )
     assert _RE_LIST_KEY.match(key)
     for list_info in iter_lists_online():
@@ -232,20 +280,37 @@ def _get_list_info_from_key(key: str) -> Top500ListInfo:
     raise RuntimeError(f'List info for key "{key}" was not found online.')
 
 
-def _get_list_info(key_or_list_info: str | Top500ListInfo) -> Top500ListInfo:
-    if isinstance(key_or_list_info, str):
-        key = key_or_list_info
+def _get_list_info(list_info_or_key: str | Top500ListInfo) -> Top500ListInfo:
+    if isinstance(list_info_or_key, str):
+        key = list_info_or_key
         list_info = _get_list_info_from_key(key)
         return list_info
-    if isinstance(key_or_list_info, Top500ListInfo):
-        list_info = key_or_list_info
+    if isinstance(list_info_or_key, Top500ListInfo):
+        list_info = list_info_or_key
         return list_info
     raise ValueError(
-        f"key_or_list_info must be either str or Top500ListInfo, passed {type(identifier)}"
+        f"list_info_or_key must be either str or Top500ListInfo, passed {type(list_info_or_key)}"
     )
 
 
-def download_list(key_or_list_info: str | Top500ListInfo) -> None:
+def download_list(list_info_or_key: str | Top500ListInfo) -> None:
+    """Download a TOP500 list issue. If the list is already present locally, it will not be downloaded again.
+
+    This will create a `.tar.gz` file (e.g. `2025-06.tar.gz`) containing for example
+    ```
+    ├── metadata.json (the list info as json)
+    ├── TOP500_202506_all.xml (the downloaded XML file)
+    ├── TOP500_202506.tsv (the Excel file below converted to tsv)
+    └── TOP500_202506.xlsx (the downloaded Excel file)
+    ```
+
+    Args:
+        list_info_or_key (str | Top500ListInfo): An identifier describing the list that shall be downloaded, either as a
+            Top500ListInfo object or only the key as a str. When only the key is passed, `iter_lists_online()` will be
+            called to construct the corresponding list info object. It is therefore discouraged to download multiple
+            lists by only specifying the key. Instead, call `iter_lists_online()` once and store the result.
+    """
+
     def download_file_from_link_text(link_text: str, anchors, tar):
         download_anchor = next(filter(lambda a: a.text == link_text, anchors), None)
         assert download_anchor is not None, ("No download link found", link_text)
@@ -267,7 +332,8 @@ def download_list(key_or_list_info: str | Top500ListInfo) -> None:
         # We convert the Excel files (.xlsx or .xls) to .tsv using pandas.read_excel() and pandas.to_csv().
         # We aren't using polars.read_excel(), but Unfortunately this fails on some Excel files from the TOP500 website.
         # We are using tsv instead of csv, because commas are plenty in the tables are tabs are rare.
-        # However, the tabs that ARE there have no business being there in the first place and are likely a result of careless copy-pasting.
+        # However, the tabs that ARE there have no business being there in the first place and are likely a result of
+        # careless copy-pasting.
         # Therefore, it suffices to simply replace them with spaces.
         # This way, we can avoid quoting in the resulting .tsv file completely.
         df = pd.read_excel(excel_buf, dtype=str, header=None)
@@ -290,13 +356,13 @@ def download_list(key_or_list_info: str | Top500ListInfo) -> None:
         tarinfo.size = len(json_bytes)
         tar.addfile(tarinfo, bio)
 
-    key = _get_key(key_or_list_info)
+    key = _get_key(list_info_or_key)
 
     target_path = get_download_dir() / f"{key}.tar.gz"
     if target_path.exists():
         return
 
-    list_info = _get_list_info(key_or_list_info)
+    list_info = _get_list_info(list_info_or_key)
 
     with tempfile.NamedTemporaryFile(delete_on_close=True) as tmp:
         with tarfile.open(name=tmp.name, mode="w:gz") as tar:
@@ -321,19 +387,36 @@ def download_list(key_or_list_info: str | Top500ListInfo) -> None:
 
 
 def download_all_lists() -> None:
+    """Downloaded all TOP500 list issues that are available online to the download directory."""
     for info in iter_lists_online():
         download_list(info)
 
 
 def read_list(
-    key_or_list_info: str | Top500ListInfo, allow_download: bool = True
+    list_info_or_key: str | Top500ListInfo, allow_download: bool = True
 ) -> pl.DataFrame:
+    """Read a list as a polars DataFrame. Supports downloading the list automatically if it is not available locally.
+
+    Args:
+        list_info_or_key (str | Top500ListInfo): An identifier describing the list that shall be read, either as a
+            Top500ListInfo object or only the key as a str. If the file must be downloaded and only the key is given,
+            the list info object will be constructed by calling `iter_lists_online()`. It is therefore discouraged to
+            pass only the key when multiple lists shall be read. Instead, call `iter_lists_online()` once and store
+            the list info objects.
+        allow_download (bool, optional): Wether downloading the list is allowed when it is not stored locally. If False,
+            a RuntimeError will be raised when the list is not downloaded. Defaults to True.
+
+    Raises:
+        RuntimeError: When `allow_download` is set to `False` and the file is not available locally.
+
+    Returns:
+        pl.DataFrame: A polars DataFrame containing the TOP500 list issue data.
+    """
     # TODO: Add argument normalized: bool = True
     # normalized == True ==> the columns of the dataframe and their dtype will always be the same
     # normalized == False ==> read raw
     # Current behaviour is normalized == False
-
-    key = _get_key(key_or_list_info)
+    key = _get_key(list_info_or_key)
     assert _RE_LIST_KEY.match(key)
     filename = get_download_dir() / f"{key}.tar.gz"
     if not filename.exists():
@@ -341,7 +424,7 @@ def read_list(
             raise RuntimeError(
                 f'List "{key}" was not found locally and allow_download == False.'
             )
-        download_list(key_or_list_info)
+        download_list(list_info_or_key)
     assert filename.exists()
     with tarfile.open(filename, "r:gz") as tar:
         tsv_members = [
