@@ -62,8 +62,9 @@ def main() -> None:
         case "download-all":
             top500.download_all_lists()
         case "display":
-            # TODO: Add normalize=True when implemented
-            df = top500.read_list(args.key)
+            df = top500.read_list(
+                args.key, allow_download=True, source="normalized-pretty"
+            )
             with pl.Config(tbl_rows=-1):
                 print(df)
         case _:
