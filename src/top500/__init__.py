@@ -439,9 +439,3 @@ def read_list(
         tsv_fp = tar.extractfile(tsv_members[0])
         df = pl.read_csv(tsv_fp, separator="\t")
         return df
-
-
-def main() -> None:
-    print("Hello from top500!")
-    print("The main method will serve as a downloader.")
-    print("TODO: Add argparse and all that...")
