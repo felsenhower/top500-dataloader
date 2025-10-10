@@ -439,5 +439,5 @@ def read_list(
         ]
         assert len(tsv_members) == 1
         tsv_fp = tar.extractfile(tsv_members[0])
-        df = pl.read_csv(tsv_fp, separator="\t")
+        df = pl.read_csv(tsv_fp, separator="\t", infer_schema_length=10000)
         return df
