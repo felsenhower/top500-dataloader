@@ -674,6 +674,15 @@ def main() -> None:
             download_all_lists()
         case "display":
             df = read_list(args.key, allow_download=True, source="normalized-pretty")
+            df = df.select(
+                "Rank",
+                "System Name",
+                "Country",
+                "Manufacturer",
+                "Rmax [GFlop/s]",
+                "Rpeak [GFlop/s]",
+                "Power [kW]",
+            )
             with pl.Config(tbl_rows=-1):
                 print(df)
         case _:
