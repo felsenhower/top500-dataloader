@@ -485,5 +485,7 @@ def read_list(
         tsv_name = "from_excel.tsv" if source == "excel" else "from_xml.tsv"
         tsv_member = tar.getmember(tsv_name)
         tsv_fp = tar.extractfile(tsv_member)
-        df = pl.read_csv(tsv_fp, separator="\t", infer_schema_length=10000)
+        df = pl.read_csv(
+            tsv_fp, separator="\t", infer_schema_length=10000, quote_char=None
+        )
         return df
