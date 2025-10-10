@@ -8,10 +8,11 @@ import re
 import shutil
 import tarfile
 import tempfile
+from collections.abc import Buffer, Iterable
 from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
-from tarfile import TarInfo
+from tarfile import TarFile, TarInfo
 from typing import Iterator
 from urllib.parse import urljoin
 
@@ -20,6 +21,7 @@ import platformdirs
 import polars as pl
 import requests
 from bs4 import BeautifulSoup
+from bs4.element import Tag as HtmlTag
 from pydantic import HttpUrl, TypeAdapter
 from pydantic.dataclasses import dataclass
 from ratelimit import limits, sleep_and_retry
@@ -167,7 +169,7 @@ def iter_lists_online(newest_first: bool = True) -> Iterator[Top500ListInfo]:
         Iterator[Top500ListInfo]: An iterator over Top500ListInfo.
     """
 
-    def parse_date(date_str):
+    def parse_date(date_str: str) -> date:
         for fmt in ("%B %d, %Y", "%b %d, %Y", "%b. %d, %Y"):
             try:
                 return datetime.strptime(date_str, fmt).date()
@@ -175,7 +177,7 @@ def iter_lists_online(newest_first: bool = True) -> Iterator[Top500ListInfo]:
                 continue
         raise ValueError(f'Unrecognized date format: "{date_str}"')
 
-    def parse_place(place_str):
+    def parse_place(place_str: str) -> str:
         if place_str == "Virtual":
             return place_str
         if place_str == "Hamburg":
@@ -249,6 +251,7 @@ def iter_lists_local(newest_first: bool = True) -> Iterator[Top500ListInfo]:
         with tarfile.open(path, "r:gz") as tar:
             meta_member = tar.getmember("metadata.json")
             meta_fp = tar.extractfile(meta_member)
+            assert meta_fp is not None
             adapter = TypeAdapter(Top500ListInfo)
             list_info = adapter.validate_json(meta_fp.read())
             yield list_info
@@ -311,7 +314,9 @@ def download_list(list_info_or_key: str | Top500ListInfo) -> None:
             lists by only specifying the key. Instead, call `iter_lists_online()` once and store the result.
     """
 
-    def download_file_from_link_text(link_text: str, anchors, tar):
+    def download_file_from_link_text(
+        link_text: str, anchors: Iterable[HtmlTag], tar: TarFile
+    ):
         download_anchor = next(filter(lambda a: a.text == link_text, anchors), None)
         assert download_anchor is not None, ("No download link found", link_text)
         href = download_anchor["href"]
@@ -328,7 +333,7 @@ def download_list(list_info_or_key: str | Top500ListInfo) -> None:
         tar.addfile(tarinfo, bio)
         return (filename_from_url, bio)
 
-    def write_tsv_from_excel(excel_name, excel_buf, tar):
+    def write_tsv_from_excel(excel_name: str, excel_buf: Buffer, tar: TarFile):
         # We convert the Excel files (.xlsx or .xls) to .tsv using pandas.read_excel() and pandas.to_csv().
         # We aren't using polars.read_excel(), but Unfortunately this fails on some Excel files from the TOP500 website.
         # We are using tsv instead of csv, because commas are plenty in the tables are tabs are rare.
@@ -347,7 +352,7 @@ def download_list(list_info_or_key: str | Top500ListInfo) -> None:
         tarinfo.size = sio_len
         tar.addfile(tarinfo, sio)
 
-    def write_metadata(list_info, tar):
+    def write_metadata(list_info: Top500ListInfo, tar: TarFile):
         bio = BytesIO()
         adapter = TypeAdapter(Top500ListInfo)
         json_bytes = adapter.dump_json(list_info, indent=2)
