@@ -507,7 +507,7 @@ def download_all_lists() -> None:
 def read_list(
     list_info_or_key: str | Top500ListInfo,
     allow_download: bool = True,
-    source: str = "excel",
+    source: str = "normalized",
 ) -> pl.DataFrame:
     """Read a list as a polars DataFrame. Supports downloading the list automatically if it is not available locally.
 
