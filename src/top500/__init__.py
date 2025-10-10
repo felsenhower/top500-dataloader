@@ -65,8 +65,9 @@ def _fetch(url):
 
 
 _TOP500_OVERVIEW_URL = HttpUrl("https://top500.org/lists/top500/")
-_RE_LIST_NAME = re.compile("^(?:June)|(?:November) [0-9]{4}$")
-_RE_LIST_HREF = re.compile("^([0-9]{4})/([0-9]{2})$")
+_RE_LIST_NAME = re.compile(r"^(?:June)|(?:November) [0-9]{4}$")
+_RE_LIST_HREF = re.compile(r"^([0-9]{4})/([0-9]{2})$")
+_RE_DOWNLOADED_LIST_FILE = re.compile(r"^([0-9]{4})-([0-9]{2})\.tar\.gz$")
 _RE_LIST_DESCRIPTION = re.compile(
     r"""
     ^
@@ -206,7 +207,15 @@ def iter_lists_online(newest_first: bool = True) -> Iterator[Top500ListInfo]:
 
 
 def iter_lists_local(newest_first: bool = True) -> Iterator[Top500ListInfo]:
-    raise NotImplementedError()
+    for path in sorted(get_download_dir().iterdir(), reverse=newest_first):
+        if not _RE_DOWNLOADED_LIST_FILE.match(path.name):
+            continue
+        with tarfile.open(path, "r:gz") as tar:
+            meta_member = tar.getmember("metadata.json")
+            meta_fp = tar.extractfile(meta_member)
+            adapter = TypeAdapter(Top500ListInfo)
+            list_info = adapter.validate_json(meta_fp.read())
+            yield list_info
 
 
 def download_list(list_info: Top500ListInfo) -> None:
