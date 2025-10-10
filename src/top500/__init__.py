@@ -210,7 +210,7 @@ _NORMALIZED_COLUMN_MAPPINGS = (
     NormalizedColumnMapping("Site Name", "site", pl.String, "xml", ("installation-site-name",)),
     NormalizedColumnMapping("Site Address", "site-address", pl.String, "xml", ("installation-site-address",)),
     NormalizedColumnMapping("Site ID", "site-id", pl.Int64, "xml", ("site-id",)),
-    NormalizedColumnMapping("Segment", "segment", pl.String, "xml", ("area-of-installation",)),
+    NormalizedColumnMapping("Segment", "segment", pl.String, "excel", ("Segment",)),
     NormalizedColumnMapping("Town", "town", pl.String, "xml", ("town",)),
     NormalizedColumnMapping("State", "state", pl.String, "xml", ("state",)),
     NormalizedColumnMapping("Country", "country", pl.String, "xml", ("country",)),
@@ -575,11 +575,16 @@ def read_list(
                 (pl.col("Mflops/Watt") / 1000).alias("Energy Efficiency [GFlops/Watts]")
             )
         df_excel = get_filtered_df(df_excel, "excel", extra_columns=["Rank"])
+        df_excel = df_excel.with_columns(
+            pl.col("processor-speed-mhz").cast(pl.Int64).alias("processor-speed-mhz")
+        )
         df_excel = df_excel.rename({"Rank": "rank"})
         df_xml = read_tsv_xml(tar)
         df_xml = get_filtered_df(df_xml, "xml")
         df_joined = df_xml.join(df_excel, on="rank", how="inner", validate="1:1")
         df_joined = df_joined.select(m.key for m in mappings)
+        for actual_dtype, m in zip(df_joined.dtypes, mappings):
+            assert actual_dtype == m.dtype, (actual_dtype, m.dtype, m.key)
         assert df_joined.shape == (500, len(mappings))
         return df_joined
 
