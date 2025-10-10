@@ -308,6 +308,9 @@ def download_list(list_info_or_key: str | Top500ListInfo) -> None:
     ├── TOP500_202506.tsv (the Excel file below converted to tsv)
     └── TOP500_202506.xlsx (the downloaded Excel file)
     ```
+    
+    To get more information about why we are creating a tsv file (and not csv) and which preprocessing steps are
+    involved, see the nested function `write_tsv_from_excel()`.
 
     Args:
         list_info_or_key (str | Top500ListInfo): An identifier describing the list that shall be downloaded, either as a
@@ -336,16 +339,30 @@ def download_list(list_info_or_key: str | Top500ListInfo) -> None:
         return (filename_from_url, bio)
 
     def write_tsv_from_excel(excel_name: str, excel_buf: Buffer, tar: TarFile):
-        # We convert the Excel files (.xlsx or .xls) to .tsv using pandas.read_excel() and pandas.to_csv().
-        # We aren't using polars.read_excel(), but Unfortunately this fails on some Excel files from the TOP500 website.
-        # We are using tsv instead of csv, because commas are plenty in the tables are tabs are rare.
-        # However, the tabs that ARE there have no business being there in the first place and are likely a result of
-        # careless copy-pasting.
-        # Therefore, it suffices to simply replace them with spaces.
-        # This way, we can avoid quoting in the resulting .tsv file completely.
+        """Create a tsv file from an Excel file (.xls or .xslx) and write it to a tar file.
+
+        We are writing .tsv (and not .csv), because commas are plenty in the tables and quoting / escaping is annoying.
+        There are a few instances of tabs in the cell content, but these are only a result of careless copy-pasting, so
+        it's okay to remove them.
+        To convert the Excel files to .tsv, we use `pandas.read_excel()` and `pandas.to_csv()`.
+        We are unable to use polars for this task, because `polars.read_excel()` fails on some of the Excel files.
+        The preprocessing is kept minimal; all cell content is preserved as-is, whereever possible.
+
+        Preprocessing steps:
+            - Replace tabs and line breaks with spaces.
+            - Remove all rows and columns that are empty or only contain whitespace. This is necessary, because the
+              lists up until 2007-11 contained an empty header line.
+
+        Args:
+            excel_name (str): The file name of the Excel file. This will be used to infer the name of the .tsv file.
+            excel_buf (Buffer): A buffer containing the Excel data.
+            tar (TarFile): The tar file to write to.
+        """
         df = pd.read_excel(excel_buf, dtype=str, header=None)
         df = df.replace({r"[\t\n\r]": " "}, regex=True)
-        # TODO: Remove empty lines if necessary (see 1993-06)
+        df = df.fillna("")
+        df = df[~df.apply(lambda row: row.str.fullmatch(r"\s*").all(), axis=1)]
+        df = df.loc[:, ~df.apply(lambda col: col.str.fullmatch(r"\s*").all(), axis=0)]
         sio = BytesIO()
         df.to_csv(sio, index=False, header=False, sep="\t", quoting=csv.QUOTE_NONE)
         sio_len = sio.tell()
