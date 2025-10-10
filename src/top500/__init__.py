@@ -47,16 +47,6 @@ def get_download_dir() -> Path:
     return _download_dir or _DEFAULT_DOWNLOAD_DIR
 
 
-def _prepare_download_path(path: str | os.PathLike) -> Path:
-    path = Path(path)
-    assert not path.is_absolute()
-    download_dir = _download_dir
-    if download_dir is None:
-        download_dir = _DEFAULT_DOWNLOAD_DIR
-        download_dir.mkdir(exist_ok=True)
-    return download_dir / path
-
-
 @sleep_and_retry
 @limits(calls=1, period=1)
 def _fetch(url):
@@ -263,8 +253,11 @@ def download_list(list_info: Top500ListInfo) -> None:
         tarinfo.size = len(json_bytes)
         tar.addfile(tarinfo, bio)
 
+    target_path = get_download_dir() / f"{list_info.key}.tar.gz"
+    if target_path.exists():
+        return
+
     with tempfile.NamedTemporaryFile(delete_on_close=True) as tmp:
-        print(tmp.name)
         with tarfile.open(name=tmp.name, mode="w:gz") as tar:
             write_metadata(list_info, tar)
             response = _fetch(list_info.url)
@@ -278,14 +271,17 @@ def download_list(list_info: Top500ListInfo) -> None:
             )
             write_tsv_from_excel(excel_name, excel_buf, tar)
 
+        if _download_dir is None:
+            _DEFAULT_DOWNLOAD_DIR.mkdir(exist_ok=True)
+
         # For now, let's just copy the file for safety.
         # Later, let's fo a hard-link if supported.
-        target_path = _prepare_download_path(f"{list_info.key}.tar.gz")
         shutil.copy(tmp.name, target_path)
 
 
 def download_all_lists() -> None:
-    raise NotImplementedError()
+    for info in iter_lists_online():
+        download_list(info)
 
 
 def read_list(identifier: str | Top500ListInfo) -> pl.DataFrame:
