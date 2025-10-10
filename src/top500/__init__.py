@@ -10,7 +10,7 @@ import tarfile
 import tempfile
 from collections.abc import Buffer, Iterable
 from datetime import date, datetime
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from tarfile import TarFile, TarInfo
 from typing import Iterator
@@ -304,6 +304,7 @@ def download_list(list_info_or_key: str | Top500ListInfo) -> None:
     This will create a `.tar.gz` file (e.g. `2025-06.tar.gz`) containing for example
     ```
     ├── metadata.json (the list info as json)
+    ├── TOP500_202506_all.tsv (the XML file below converted to tsv)
     ├── TOP500_202506_all.xml (the downloaded XML file)
     ├── TOP500_202506.tsv (the Excel file below converted to tsv)
     └── TOP500_202506.xlsx (the downloaded Excel file)
@@ -336,9 +337,10 @@ def download_list(list_info_or_key: str | Top500ListInfo) -> None:
         tarinfo.size = len(content)
         bio = BytesIO(content)
         tar.addfile(tarinfo, bio)
-        return (filename_from_url, bio)
+        bio.seek(0)
+        return bio
 
-    def write_tsv_from_excel(excel_name: str, excel_buf: Buffer, tar: TarFile):
+    def write_tsv_from_excel(excel_buf: Buffer, tar: TarFile):
         """Create a tsv file from an Excel file (.xls or .xslx) and write it to a tar file.
 
         We are writing .tsv (and not .csv), because commas are plenty in the tables and quoting / escaping is annoying.
@@ -354,7 +356,6 @@ def download_list(list_info_or_key: str | Top500ListInfo) -> None:
               lists up until 2007-11 contained an empty header line.
 
         Args:
-            excel_name (str): The file name of the Excel file. This will be used to infer the name of the .tsv file.
             excel_buf (Buffer): A buffer containing the Excel data.
             tar (TarFile): The tar file to write to.
         """
@@ -367,9 +368,32 @@ def download_list(list_info_or_key: str | Top500ListInfo) -> None:
         df.to_csv(sio, index=False, header=False, sep="\t", quoting=csv.QUOTE_NONE)
         sio_len = sio.tell()
         sio.seek(0)
-        tarinfo = TarInfo(name=str(Path(excel_name).with_suffix(".tsv")))
+        tarinfo = TarInfo(name="from_excel.tsv")
         tarinfo.size = sio_len
         tar.addfile(tarinfo, sio)
+
+    def write_tsv_from_xml(xml_buf: Buffer, tar: TarFile):
+        """Create a tsv file from an XML file and write to a tar file.
+
+        Args:
+            xml_buf (Buffer): A buffer containing the XML data.
+            tar (TarFile): The tar file to write to.
+        """
+        sio = StringIO(xml_buf.read().decode("utf-8"))
+        sio2 = StringIO()
+        re_installation_site = re.compile(r"</?top500:installation-site>")
+        for line in sio:
+            if re_installation_site.match(line.strip()):
+                continue
+            sio2.write(line.replace("\t", " ") + "\n")
+        df = pd.read_xml(sio2, dtype=str)
+        sio3 = BytesIO()
+        df.to_csv(sio3, index=False, header=True, sep="\t", quoting=csv.QUOTE_NONE)
+        sio_len = sio3.tell()
+        sio3.seek(0)
+        tarinfo = TarInfo(name="from_xml.tsv")
+        tarinfo.size = sio_len
+        tar.addfile(tarinfo, sio3)
 
     def write_metadata(list_info: Top500ListInfo, tar: TarFile):
         bio = BytesIO()
@@ -396,11 +420,12 @@ def download_list(list_info_or_key: str | Top500ListInfo) -> None:
             html = BeautifulSoup(response.text, "html.parser")
             navbar = html.find(id="navbarSupportedContentSubmenu")
             anchors = navbar.find_all("a")
-            download_file_from_link_text("TOP500 List (XML)", anchors, tar)
-            (excel_name, excel_buf) = download_file_from_link_text(
+            xml_buf = download_file_from_link_text("TOP500 List (XML)", anchors, tar)
+            excel_buf = download_file_from_link_text(
                 "TOP500 List (Excel)", anchors, tar
             )
-            write_tsv_from_excel(excel_name, excel_buf, tar)
+            write_tsv_from_xml(xml_buf, tar)
+            write_tsv_from_excel(excel_buf, tar)
 
         if _download_dir is None:
             _DEFAULT_DOWNLOAD_DIR.mkdir(exist_ok=True)
@@ -417,7 +442,9 @@ def download_all_lists() -> None:
 
 
 def read_list(
-    list_info_or_key: str | Top500ListInfo, allow_download: bool = True
+    list_info_or_key: str | Top500ListInfo,
+    allow_download: bool = True,
+    source: str = "excel",
 ) -> pl.DataFrame:
     """Read a list as a polars DataFrame. Supports downloading the list automatically if it is not available locally.
 
@@ -429,6 +456,7 @@ def read_list(
             the list info objects.
         allow_download (bool, optional): Wether downloading the list is allowed when it is not stored locally. If False,
             a RuntimeError will be raised when the list is not downloaded. Defaults to True.
+        source (str, optional): The data source to read from. Can be one of {excel, xml}.
 
     Raises:
         RuntimeError: When `allow_download` is set to `False` and the file is not available locally.
@@ -440,6 +468,9 @@ def read_list(
     # normalized == True ==> the columns of the dataframe and their dtype will always be the same
     # normalized == False ==> read raw
     # Current behaviour is normalized == False
+    allowed_source = {"excel", "xml"}
+    if source not in allowed_source:
+        raise ValueError(f'source "{source}" not allowed. Must be in {allowed_source}.')
     key = _get_key(list_info_or_key)
     assert _RE_LIST_KEY.match(key)
     filename = get_download_dir() / f"{key}.tar.gz"
@@ -451,10 +482,8 @@ def read_list(
         download_list(list_info_or_key)
     assert filename.exists()
     with tarfile.open(filename, "r:gz") as tar:
-        tsv_members = [
-            member for member in tar.getmembers() if Path(member.name).suffix == ".tsv"
-        ]
-        assert len(tsv_members) == 1
-        tsv_fp = tar.extractfile(tsv_members[0])
+        tsv_name = "from_excel.tsv" if source == "excel" else "from_xml.tsv"
+        tsv_member = tar.getmember(tsv_name)
+        tsv_fp = tar.extractfile(tsv_member)
         df = pl.read_csv(tsv_fp, separator="\t", infer_schema_length=10000)
         return df
