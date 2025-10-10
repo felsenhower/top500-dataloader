@@ -245,6 +245,8 @@ def iter_lists_local(newest_first: bool = True) -> Iterator[Top500ListInfo]:
     Yields:
         Iterator[Top500ListInfo]: An iterator over Top500ListInfo.
     """
+    if _download_dir is None and not _DEFAULT_DOWNLOAD_DIR.exists():
+        return
     for path in sorted(get_download_dir().iterdir(), reverse=newest_first):
         if not _RE_DOWNLOADED_LIST_FILE.match(path.name):
             continue
