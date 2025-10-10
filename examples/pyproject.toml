@@ -1,0 +1,14 @@
+[project]
+name = "examples"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "matplotlib>=3.10.7",
+    "pyqt6>=6.9.1",
+    "top500",
+]
+
+[tool.uv.sources]
+top500 = { workspace = true }
