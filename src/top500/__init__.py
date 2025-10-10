@@ -308,7 +308,7 @@ def download_list(list_info_or_key: str | Top500ListInfo) -> None:
     ├── TOP500_202506.tsv (the Excel file below converted to tsv)
     └── TOP500_202506.xlsx (the downloaded Excel file)
     ```
-    
+
     To get more information about why we are creating a tsv file (and not csv) and which preprocessing steps are
     involved, see the nested function `write_tsv_from_excel()`.
 
