@@ -1,16 +1,24 @@
-from typing import Iterator
-from pydantic.dataclasses import dataclass
-from datetime import datetime, date
-from pydantic import HttpUrl
+import csv
 import os
-from pathlib import Path
-import polars as pl
-import platformdirs
-from ratelimit import limits, sleep_and_retry
-import requests
 import re
-from bs4 import BeautifulSoup
+import shutil
+import tarfile
+import tempfile
+from datetime import date, datetime
+from io import BytesIO
+from pathlib import Path
+from tarfile import TarInfo
+from typing import Iterator
 from urllib.parse import urljoin
+
+import pandas as pd
+import platformdirs
+import polars as pl
+import requests
+from bs4 import BeautifulSoup
+from pydantic import HttpUrl, TypeAdapter
+from pydantic.dataclasses import dataclass
+from ratelimit import limits, sleep_and_retry
 
 
 @dataclass
@@ -198,19 +206,81 @@ def iter_lists_online(newest_first: bool = True) -> Iterator[Top500ListInfo]:
 
 
 def iter_lists_local(newest_first: bool = True) -> Iterator[Top500ListInfo]:
-    pass
+    raise NotImplementedError()
 
 
 def download_list(list_info: Top500ListInfo) -> None:
-    pass
+    def download_file_from_link_text(link_text: str, anchors, tar):
+        download_anchor = next(filter(lambda a: a.text == link_text, anchors), None)
+        assert download_anchor is not None, ("No download link found", link_text)
+        href = download_anchor["href"]
+        assert href is not None
+        full_download_url = HttpUrl(urljoin(str(list_info.url), href))
+        response2 = _fetch(full_download_url)
+        response2.raise_for_status()
+        content = response2.content
+        url = str(full_download_url)
+        filename_from_url = url[url.rfind("/") + 1 :]
+        tarinfo = TarInfo(name=filename_from_url)
+        tarinfo.size = len(content)
+        bio = BytesIO(content)
+        tar.addfile(tarinfo, bio)
+        return (filename_from_url, bio)
+
+    def write_tsv_from_excel(excel_name, excel_buf, tar):
+        # We convert the Excel files (.xlsx or .xls) to .tsv using pandas.read_excel() and pandas.to_csv().
+        # We aren't using polars.read_excel(), but Unfortunately this fails on some Excel files from the TOP500 website.
+        # We are using tsv instead of csv, because commas are plenty in the tables are tabs are rare.
+        # However, the tabs that ARE there have no business being there in the first place and are likely a result of careless copy-pasting.
+        # Therefore, it suffices to simply replace them with spaces.
+        # This way, we can avoid quoting in the resulting .tsv file completely.
+        df = pd.read_excel(excel_buf, dtype=str, header=None)
+        df = df.replace({r"[\t\n\r]": " "}, regex=True)
+        # TODO: Remove empty lines if necessary (see 1993-06)
+        sio = BytesIO()
+        df.to_csv(sio, index=False, header=False, sep="\t", quoting=csv.QUOTE_NONE)
+        sio_len = sio.tell()
+        sio.seek(0)
+        tarinfo = TarInfo(name=str(Path(excel_name).with_suffix(".tsv")))
+        tarinfo.size = sio_len
+        tar.addfile(tarinfo, sio)
+
+    def write_metadata(list_info, tar):
+        bio = BytesIO()
+        adapter = TypeAdapter(Top500ListInfo)
+        json_bytes = adapter.dump_json(list_info, indent=2)
+        bio = BytesIO(json_bytes)
+        tarinfo = TarInfo(name="metadata.json")
+        tarinfo.size = len(json_bytes)
+        tar.addfile(tarinfo, bio)
+
+    with tempfile.NamedTemporaryFile(delete_on_close=True) as tmp:
+        print(tmp.name)
+        with tarfile.open(name=tmp.name, mode="w:gz") as tar:
+            write_metadata(list_info, tar)
+            response = _fetch(list_info.url)
+            response.raise_for_status()
+            html = BeautifulSoup(response.text, "html.parser")
+            navbar = html.find(id="navbarSupportedContentSubmenu")
+            anchors = navbar.find_all("a")
+            download_file_from_link_text("TOP500 List (XML)", anchors, tar)
+            (excel_name, excel_buf) = download_file_from_link_text(
+                "TOP500 List (Excel)", anchors, tar
+            )
+            write_tsv_from_excel(excel_name, excel_buf, tar)
+
+        # For now, let's just copy the file for safety.
+        # Later, let's fo a hard-link if supported.
+        target_path = _prepare_download_path(f"{list_info.key}.tar.gz")
+        shutil.copy(tmp.name, target_path)
 
 
 def download_all_lists() -> None:
-    pass
+    raise NotImplementedError()
 
 
 def read_list(identifier: str | Top500ListInfo) -> pl.DataFrame:
-    pass
+    raise NotImplementedError()
 
 
 def main() -> None:
