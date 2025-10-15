@@ -6,7 +6,7 @@ Download the lists before you run it.
 
 import matplotlib.pyplot as plt
 import top500
-
+import polars as pl
 
 def main():
     has_acc_by_list = {}
@@ -20,10 +20,13 @@ def main():
         if sum(has_acc) > 0:
             has_acc_by_list[list_info.key] = has_acc
     x = list(has_acc_by_list.keys())
+    df_out = pl.DataFrame({"list_issue": x})
     for limit in (500, 250, 50):
         y = [(100.0 * sum(l[:limit]) / limit) for l in has_acc_by_list.values()]
         plt.scatter(x, y, label=f"TOP {limit}")
-        print(list(zip(x, y)), limit)
+        df_out = df_out.with_columns(pl.Series(name=f"top_{limit}", values=y))
+    print(df_out)
+    # df_out.write_csv("example_accelerators.csv")
     plt.xticks(rotation=90)
     plt.xlabel("TOP500 list release")
     plt.ylabel("Percentage of systems with an accelerator")
