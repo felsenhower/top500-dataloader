@@ -22,7 +22,7 @@ def main():
     x = list(has_acc_by_list.keys())
     for limit in (500, 250, 50):
         y = [(100.0 * sum(l[:limit]) / limit) for l in has_acc_by_list.values()]
-        plt.plot(x, y, label=f"TOP {limit}")
+        plt.scatter(x, y, label=f"TOP {limit}")
         print(list(zip(x, y)), limit)
     plt.xticks(rotation=90)
     plt.xlabel("TOP500 list release")
