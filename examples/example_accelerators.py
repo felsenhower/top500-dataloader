@@ -16,6 +16,8 @@ def main():
         has_acc = list(df["accelerator"].is_null().not_())
         if sum(has_acc) > 0:
             has_acc_by_list[list_info.key] = has_acc
+    else:
+        raise RuntimeError("Download the TOP500 lists before running this example.")
     x = list(has_acc_by_list.keys())
     for limit in (500, 250, 50):
         y = [(100.0 * sum(l[:limit]) / limit) for l in has_acc_by_list.values()]
