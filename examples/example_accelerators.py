@@ -7,6 +7,7 @@ Download the lists before you run it.
 import matplotlib.pyplot as plt
 import top500
 import polars as pl
+import json
 
 def main():
     has_acc_by_list = {}
@@ -26,7 +27,9 @@ def main():
         plt.scatter(x, y, label=f"TOP {limit}")
         df_out = df_out.with_columns(pl.Series(name=f"top_{limit}", values=y))
     print(df_out)
-    # df_out.write_csv("example_accelerators.csv")
+    df_out.write_csv("example_accelerators.csv")
+    with open("example_accelerators.json", "w") as f:
+        json.dump(df_out.to_dict(as_series=False), f, separators=(',', ':'))
     plt.xticks(rotation=90)
     plt.xlabel("TOP500 list release")
     plt.ylabel("Percentage of systems with an accelerator")
