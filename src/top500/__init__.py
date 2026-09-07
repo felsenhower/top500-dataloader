@@ -79,11 +79,16 @@ def get_download_dir() -> Path:
     return _download_dir or _DEFAULT_DOWNLOAD_DIR
 
 
+_USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
+)
+
+
 @sleep_and_retry
 @limits(calls=1, period=1)
 def _fetch(url):
     print(f"Fetching {url}...")
-    return requests.get(url)
+    return requests.get(url, headers={"User-Agent": _USER_AGENT})
 
 
 _TOP500_OVERVIEW_URL = HttpUrl("https://top500.org/lists/top500/")
